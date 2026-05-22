@@ -45,12 +45,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /fees:
+    get:
+      operationId: getFees
+      tags: [payment]
+      summary: Get current fee rates
+      description: Returns the platform fee rates in real time. Use credited_amount from /collect for the exact net amount per transaction.
+      responses:
+        "200":
+          description: Fee rates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeesResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Gateway error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /collect:
     post:
       operationId: initiatePayment
       tags: [payment]
       summary: Initiate a Mobile Money payment
-      description: Initiates a payment and returns the transaction status
+      description: |
+        Initiates a payment and returns the transaction status.
+        The platform fees are deducted automatically — credited_amount is the net amount credited.
+
+        Flow detection:
+        - 202 + flow="wave": Wave payment — display wave_url as button/QR code
+        - 202 (no wave): USSD Push — wait for webhook, client validates on phone
+        - 400 + error="otp_required" + ussd_code: OTP USSD (Orange BF) — client dials USSD code then sends OTP
+        - 400 + error="otp_required" + ussd_code=null: OTP SMS — client receives SMS OTP, re-submit with otp field
       requestBody:
         required: true
         content:
@@ -70,8 +103,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OtpRequiredResponse"
+        "403":
+          description: Forbidden — transaction does not belong to this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found — transaction does not exist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Unprocessable — country or operator not supported / wrong currency
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited — too many requests
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Gateway error — operator network rejected the payment
           content:
             application/json:
               schema:
@@ -81,7 +144,7 @@ paths:
       operationId: getTransaction
       tags: [payment]
       summary: Get transaction status
-      description: Returns the current status of a transaction
+      description: Returns the current status of a transaction by its transaction_id
       parameters:
         - name: id
           in: path
@@ -95,6 +158,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TransactionResponse"
+        "403":
+          description: Forbidden — transaction does not belong to this account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: Server error
           content:
@@ -106,6 +187,10 @@ paths:
       operationId: handleWebhook
       tags: [payment]
       summary: Receive payment webhook events
+      description: |
+        Called by Ashtech Pay when a transaction reaches a final state.
+        Always respond HTTP 200 immediately, then process business logic.
+        The amount field is the net amount (after fees). total_amount is the gross collected amount.
       requestBody:
         required: true
         content:
@@ -160,27 +245,68 @@ components:
             $ref: "#/components/schemas/Country"
       required:
         - countries
+    FeesResponse:
+      type: object
+      description: Platform fee rates returned by Ashtech Pay
+      properties:
+        fees:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeeEntry"
+      required:
+        - fees
+    FeeEntry:
+      type: object
+      properties:
+        operator:
+          type: string
+        country_code:
+          type: string
+        fee_type:
+          type: string
+          description: "percentage or fixed"
+        fee_value:
+          type: number
+          description: "Fee rate (e.g. 2.5 for 2.5%) or fixed amount"
+        min_fee:
+          type: number
+        max_fee:
+          type: number
+      required:
+        - operator
+        - country_code
+        - fee_type
+        - fee_value
     CollectRequest:
       type: object
       properties:
         amount:
           type: number
+          description: Gross amount to collect
         currency:
           type: string
+          description: "Country currency (XAF, XOF, GNF, CDF…)"
         phone:
           type: string
+          description: Payer phone number
         operator:
           type: string
+          description: Exact operator name from /countries (e.g. MTN Mobile Money)
         country_code:
           type: string
+          description: "ISO country code (CM, SN, CI…)"
         customer_name:
           type: string
+          description: Payer full name (optional, not forwarded to Ashtech Pay)
         reference:
           type: string
+          description: Your unique order reference
         otp:
           type: string
+          description: OTP code if required (see 400 otp_required response)
         notify_url:
           type: string
+          description: Webhook URL to receive the payment result
       required:
         - amount
         - currency
@@ -196,18 +322,24 @@ components:
           type: string
         status:
           type: string
+          description: "pending | success | failed"
         amount:
           type: number
+          description: Gross collected amount
         credited_amount:
           type: number
+          description: Net amount credited after platform fees
         fee_amount:
           type: number
+          description: Platform fee deducted
         currency:
           type: string
         flow:
           type: string
+          description: "Payment flow: wave | ussd_push | otp_sms | otp_ussd"
         wave_url:
           type: string
+          description: Wave payment URL (only present when flow=wave)
       required:
         - transaction_id
         - status
@@ -218,10 +350,13 @@ components:
       properties:
         error:
           type: string
+          description: "Always otp_required"
         message:
           type: string
         ussd_code:
           type: string
+          nullable: true
+          description: "USSD code to dial (OTP USSD flow, Orange BF only). Null for OTP SMS flow."
       required:
         - error
         - message
@@ -234,20 +369,26 @@ components:
           type: string
         status:
           type: string
+          description: "pending | success | failed"
         amount:
           type: number
+          description: Gross collected amount
         credited_amount:
           type: number
+          description: Net amount credited after fees
         fee_amount:
           type: number
+          description: Platform fee deducted
         currency:
           type: string
         phone:
           type: string
         created_at:
           type: string
+          format: date-time
         confirmed_at:
           type: string
+          format: date-time
       required:
         - transaction_id
         - status
@@ -255,9 +396,14 @@ components:
         - currency
     WebhookEvent:
       type: object
+      description: |
+        Event sent by Ashtech Pay when a transaction reaches a final state.
+        Events: payment.completed, payment.failed, payout.completed, payout.failed
+        Note: amount = net after fees, total_amount = gross collected
       properties:
         event:
           type: string
+          description: "payment.completed | payment.failed | payout.completed | payout.failed"
         transaction_id:
           type: string
         reference:
@@ -266,14 +412,17 @@ components:
           type: string
         amount:
           type: number
+          description: Net amount after platform fees
         total_amount:
           type: number
+          description: Gross collected amount (before fees)
         currency:
           type: string
         phone:
           type: string
         timestamp:
           type: string
+          format: date-time
       required:
         - event
         - transaction_id

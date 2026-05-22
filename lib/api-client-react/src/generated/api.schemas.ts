@@ -20,42 +20,81 @@ export interface CountriesResponse {
   countries: Country[];
 }
 
-export interface CollectRequest {
-  amount: number;
-  currency: string;
-  phone: string;
+export interface FeeEntry {
   operator: string;
   country_code: string;
+  /** percentage or fixed */
+  fee_type: string;
+  /** Fee rate (e.g. 2.5 for 2.5%) or fixed amount */
+  fee_value: number;
+  min_fee?: number;
+  max_fee?: number;
+}
+
+/**
+ * Platform fee rates returned by Ashtech Pay
+ */
+export interface FeesResponse {
+  fees: FeeEntry[];
+}
+
+export interface CollectRequest {
+  /** Gross amount to collect */
+  amount: number;
+  /** Country currency (XAF, XOF, GNF, CDF…) */
+  currency: string;
+  /** Payer phone number */
+  phone: string;
+  /** Exact operator name from /countries (e.g. MTN Mobile Money) */
+  operator: string;
+  /** ISO country code (CM, SN, CI…) */
+  country_code: string;
+  /** Payer full name (optional, not forwarded to Ashtech Pay) */
   customer_name?: string;
+  /** Your unique order reference */
   reference?: string;
+  /** OTP code if required (see 400 otp_required response) */
   otp?: string;
+  /** Webhook URL to receive the payment result */
   notify_url?: string;
 }
 
 export interface CollectResponse {
   transaction_id: string;
   reference?: string;
+  /** pending | success | failed */
   status: string;
+  /** Gross collected amount */
   amount: number;
+  /** Net amount credited after platform fees */
   credited_amount?: number;
+  /** Platform fee deducted */
   fee_amount?: number;
   currency: string;
+  /** Payment flow: wave | ussd_push | otp_sms | otp_ussd */
   flow?: string;
+  /** Wave payment URL (only present when flow=wave) */
   wave_url?: string;
 }
 
 export interface OtpRequiredResponse {
+  /** Always otp_required */
   error: string;
   message: string;
-  ussd_code?: string;
+  /** USSD code to dial (OTP USSD flow, Orange BF only). Null for OTP SMS flow. */
+  ussd_code?: string | null;
 }
 
 export interface TransactionResponse {
   transaction_id: string;
   reference?: string;
+  /** pending | success | failed */
   status: string;
+  /** Gross collected amount */
   amount: number;
+  /** Net amount credited after fees */
   credited_amount?: number;
+  /** Platform fee deducted */
   fee_amount?: number;
   currency: string;
   phone?: string;
@@ -63,12 +102,21 @@ export interface TransactionResponse {
   confirmed_at?: string;
 }
 
+/**
+ * Event sent by Ashtech Pay when a transaction reaches a final state.
+Events: payment.completed, payment.failed, payout.completed, payout.failed
+Note: amount = net after fees, total_amount = gross collected
+
+ */
 export interface WebhookEvent {
+  /** payment.completed | payment.failed | payout.completed | payout.failed */
   event: string;
   transaction_id: string;
   reference?: string;
   status?: string;
+  /** Net amount after platform fees */
   amount?: number;
+  /** Gross collected amount (before fees) */
   total_amount?: number;
   currency?: string;
   phone?: string;

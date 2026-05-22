@@ -32358,16 +32358,26 @@ var GetCountriesResponse = objectType({
     "operators": arrayType(stringType())
   }))
 });
+var GetFeesResponse = objectType({
+  "fees": arrayType(objectType({
+    "operator": stringType(),
+    "country_code": stringType(),
+    "fee_type": stringType().describe("percentage or fixed"),
+    "fee_value": numberType().describe("Fee rate (e.g. 2.5 for 2.5%) or fixed amount"),
+    "min_fee": numberType().optional(),
+    "max_fee": numberType().optional()
+  }))
+}).describe("Platform fee rates returned by Ashtech Pay");
 var InitiatePaymentBody = objectType({
-  "amount": numberType(),
-  "currency": stringType(),
-  "phone": stringType(),
-  "operator": stringType(),
-  "country_code": stringType(),
-  "customer_name": stringType().optional(),
-  "reference": stringType().optional(),
-  "otp": stringType().optional(),
-  "notify_url": stringType().optional()
+  "amount": numberType().describe("Gross amount to collect"),
+  "currency": stringType().describe("Country currency (XAF, XOF, GNF, CDF\u2026)"),
+  "phone": stringType().describe("Payer phone number"),
+  "operator": stringType().describe("Exact operator name from /countries (e.g. MTN Mobile Money)"),
+  "country_code": stringType().describe("ISO country code (CM, SN, CI\u2026)"),
+  "customer_name": stringType().optional().describe("Payer full name (optional, not forwarded to Ashtech Pay)"),
+  "reference": stringType().optional().describe("Your unique order reference"),
+  "otp": stringType().optional().describe("OTP code if required (see 400 otp_required response)"),
+  "notify_url": stringType().optional().describe("Webhook URL to receive the payment result")
 });
 var GetTransactionParams = objectType({
   "id": coerce.string()
@@ -32375,26 +32385,26 @@ var GetTransactionParams = objectType({
 var GetTransactionResponse = objectType({
   "transaction_id": stringType(),
   "reference": stringType().optional(),
-  "status": stringType(),
-  "amount": numberType(),
-  "credited_amount": numberType().optional(),
-  "fee_amount": numberType().optional(),
+  "status": stringType().describe("pending | success | failed"),
+  "amount": numberType().describe("Gross collected amount"),
+  "credited_amount": numberType().optional().describe("Net amount credited after fees"),
+  "fee_amount": numberType().optional().describe("Platform fee deducted"),
   "currency": stringType(),
   "phone": stringType().optional(),
-  "created_at": stringType().optional(),
-  "confirmed_at": stringType().optional()
+  "created_at": coerce.date().optional(),
+  "confirmed_at": coerce.date().optional()
 });
 var HandleWebhookBody = objectType({
-  "event": stringType(),
+  "event": stringType().describe("payment.completed | payment.failed | payout.completed | payout.failed"),
   "transaction_id": stringType(),
   "reference": stringType().optional(),
   "status": stringType().optional(),
-  "amount": numberType().optional(),
-  "total_amount": numberType().optional(),
+  "amount": numberType().optional().describe("Net amount after platform fees"),
+  "total_amount": numberType().optional().describe("Gross collected amount (before fees)"),
   "currency": stringType().optional(),
   "phone": stringType().optional(),
-  "timestamp": stringType().optional()
-});
+  "timestamp": coerce.date().optional()
+}).describe("Event sent by Ashtech Pay when a transaction reaches a final state.\nEvents: payment.completed, payment.failed, payout.completed, payout.failed\nNote: amount = net after fees, total_amount = gross collected\n");
 var HandleWebhookResponse = objectType({
   "received": booleanType()
 });
@@ -32481,7 +32491,7 @@ var COUNTRIES_FALLBACK = {
     { name: "Cameroun", code: "CM", currency: "XAF", operators: ["MTN Mobile Money", "Orange Money"] },
     { name: "Centrafrique", code: "CF", currency: "XAF", operators: ["Orange Money"] },
     { name: "Congo", code: "CG", currency: "XAF", operators: ["Airtel Money", "MTN Mobile Money"] },
-    { name: "C\xF4te d'Ivoire", code: "CI", currency: "XOF", operators: ["Moov Money", "MTN", "Orange Money", "Wave"] },
+    { name: "C\xF4te d'Ivoire", code: "CI", currency: "XOF", operators: ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"] },
     { name: "Gabon", code: "GA", currency: "XAF", operators: ["Airtel Money", "Moov Money"] },
     { name: "Guin\xE9e Conakry", code: "GN", currency: "GNF", operators: ["MTN Mobile Money", "Orange Money"] },
     { name: "Guin\xE9e \xC9quatoriale", code: "GQ", currency: "XAF", operators: ["Orange Money"] },
@@ -32548,6 +32558,68 @@ router2.get("/countries", async (req, res) => {
     req.log.warn({ err }, "Ashtech Pay unreachable, using fallback countries");
     res.json(COUNTRIES_FALLBACK);
   }
+});
+router2.get("/fees", async (req, res) => {
+  if (!ASHTECH_API_KEY) {
+    req.log.error("ASHTECH_PAY_API_KEY is not configured");
+    res.status(500).json({
+      error: "configuration_error",
+      message: "Cl\xE9 API non configur\xE9e. Contactez l'administrateur."
+    });
+    return;
+  }
+  let response;
+  try {
+    response = await fetch(`${ASHTECH_BASE}/v1/fees`, {
+      headers: ashtechHeaders()
+    });
+  } catch (err) {
+    req.log.error({ err }, "Network error reaching Ashtech Pay fees");
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: 0,
+      contentType: null,
+      isJson: false,
+      responseBody: String(err),
+      note: "Erreur r\xE9seau \u2014 serveur AshtechPay injoignable (fees)"
+    });
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Impossible de joindre le serveur de paiement."
+    });
+    return;
+  }
+  const { data, rawText } = await safeParseJson(response);
+  const contentType = response.headers.get("content-type");
+  if (data === null) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: response.status,
+      contentType,
+      isJson: false,
+      responseBody: rawText.slice(0, 1e3),
+      note: response.status === 403 ? "Cloudflare bloque la requ\xEAte (403) \u2014 IP serveur non whitelist\xE9e" : "R\xE9ponse non-JSON re\xE7ue pour les frais"
+    });
+    res.status(502).json({
+      error: "gateway_error",
+      message: "R\xE9ponse invalide du serveur de paiement."
+    });
+    return;
+  }
+  if (!response.ok) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: response.status,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1e3),
+      note: `Erreur AshtechPay sur fees : ${response.status}`
+    });
+  }
+  res.status(response.ok ? 200 : response.status).json(data);
 });
 router2.post("/collect", async (req, res) => {
   if (!ASHTECH_API_KEY) {
@@ -32652,6 +32724,66 @@ router2.post("/collect", async (req, res) => {
     });
     return;
   }
+  if (response.status === 403) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 403,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1e3),
+      requestBody: ashtechBody,
+      note: "Acc\xE8s interdit (403) \u2014 cette transaction n'appartient pas \xE0 ce compte"
+    });
+    res.status(403).json(data);
+    return;
+  }
+  if (response.status === 404) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 404,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1e3),
+      requestBody: ashtechBody,
+      note: "Transaction introuvable (404)"
+    });
+    res.status(404).json(data);
+    return;
+  }
+  if (response.status === 422) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 422,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1e3),
+      requestBody: ashtechBody,
+      note: "Pays ou op\xE9rateur non support\xE9 / devise incorrecte (422)"
+    });
+    res.status(422).json(data);
+    return;
+  }
+  if (response.status === 429) {
+    req.log.warn({ status: 429 }, "Ashtech Pay rate limit reached");
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 429,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1e3),
+      requestBody: ashtechBody,
+      note: "Trop de requ\xEAtes (429) \u2014 ralentir les appels"
+    });
+    res.status(429).json({
+      error: "rate_limited",
+      message: "Trop de requ\xEAtes. Veuillez patienter avant de r\xE9essayer."
+    });
+    return;
+  }
   req.log.error({ status: response.status, data }, "Unexpected status from Ashtech Pay collect");
   logAshtechError({
     timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -32713,6 +32845,40 @@ router2.get("/transaction/:id", async (req, res) => {
     });
     return;
   }
+  if (response.status === 404) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: 404,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1e3),
+      note: "Transaction introuvable (404)"
+    });
+    res.status(404).json(data);
+    return;
+  }
+  if (response.status === 403) {
+    logAshtechError({
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: 403,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1e3),
+      note: "Acc\xE8s interdit (403) \u2014 cette transaction n'appartient pas \xE0 ce compte"
+    });
+    res.status(403).json(data);
+    return;
+  }
+  if (response.status === 429) {
+    req.log.warn({ status: 429 }, "Ashtech Pay rate limit on transaction check");
+    res.status(429).json({
+      error: "rate_limited",
+      message: "Trop de requ\xEAtes. Veuillez patienter avant de r\xE9essayer."
+    });
+    return;
+  }
   if (!response.ok) {
     logAshtechError({
       timestamp: (/* @__PURE__ */ new Date()).toISOString(),
@@ -32733,10 +32899,13 @@ router2.post("/webhook", async (req, res) => {
     logger.warn({ body: req.body }, "Invalid webhook payload received");
     return;
   }
-  const { event, transaction_id, reference, amount, currency } = parsed.data;
-  logger.info({ event, transaction_id, reference, amount, currency }, "Webhook received");
+  const { event, transaction_id, reference, amount, total_amount, currency, phone } = parsed.data;
+  logger.info({ event, transaction_id, reference, amount, total_amount, currency, phone }, "Webhook received");
   if (event === "payment.completed") {
-    logger.info({ transaction_id, reference, amount, currency }, "Payment completed");
+    logger.info(
+      { transaction_id, reference, amount, total_amount, currency },
+      "Payment completed \u2014 net credited: " + amount + " " + currency + " (gross: " + total_amount + ")"
+    );
   } else if (event === "payment.failed") {
     logger.warn({ transaction_id, reference }, "Payment failed");
   } else if (event === "payout.completed") {

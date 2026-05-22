@@ -32,24 +32,48 @@ export const GetCountriesResponse = zod.object({
 
 
 /**
- * Initiates a payment and returns the transaction status
+ * Returns the platform fee rates in real time. Use credited_amount from /collect for the exact net amount per transaction.
+ * @summary Get current fee rates
+ */
+export const GetFeesResponse = zod.object({
+  "fees": zod.array(zod.object({
+  "operator": zod.string(),
+  "country_code": zod.string(),
+  "fee_type": zod.string().describe('percentage or fixed'),
+  "fee_value": zod.number().describe('Fee rate (e.g. 2.5 for 2.5%) or fixed amount'),
+  "min_fee": zod.number().optional(),
+  "max_fee": zod.number().optional()
+}))
+}).describe('Platform fee rates returned by Ashtech Pay')
+
+
+/**
+ * Initiates a payment and returns the transaction status.
+The platform fees are deducted automatically — credited_amount is the net amount credited.
+
+Flow detection:
+- 202 + flow="wave": Wave payment — display wave_url as button/QR code
+- 202 (no wave): USSD Push — wait for webhook, client validates on phone
+- 400 + error="otp_required" + ussd_code: OTP USSD (Orange BF) — client dials USSD code then sends OTP
+- 400 + error="otp_required" + ussd_code=null: OTP SMS — client receives SMS OTP, re-submit with otp field
+
  * @summary Initiate a Mobile Money payment
  */
 export const InitiatePaymentBody = zod.object({
-  "amount": zod.number(),
-  "currency": zod.string(),
-  "phone": zod.string(),
-  "operator": zod.string(),
-  "country_code": zod.string(),
-  "customer_name": zod.string().optional(),
-  "reference": zod.string().optional(),
-  "otp": zod.string().optional(),
-  "notify_url": zod.string().optional()
+  "amount": zod.number().describe('Gross amount to collect'),
+  "currency": zod.string().describe('Country currency (XAF, XOF, GNF, CDF…)'),
+  "phone": zod.string().describe('Payer phone number'),
+  "operator": zod.string().describe('Exact operator name from \/countries (e.g. MTN Mobile Money)'),
+  "country_code": zod.string().describe('ISO country code (CM, SN, CI…)'),
+  "customer_name": zod.string().optional().describe('Payer full name (optional, not forwarded to Ashtech Pay)'),
+  "reference": zod.string().optional().describe('Your unique order reference'),
+  "otp": zod.string().optional().describe('OTP code if required (see 400 otp_required response)'),
+  "notify_url": zod.string().optional().describe('Webhook URL to receive the payment result')
 })
 
 
 /**
- * Returns the current status of a transaction
+ * Returns the current status of a transaction by its transaction_id
  * @summary Get transaction status
  */
 export const GetTransactionParams = zod.object({
@@ -59,31 +83,35 @@ export const GetTransactionParams = zod.object({
 export const GetTransactionResponse = zod.object({
   "transaction_id": zod.string(),
   "reference": zod.string().optional(),
-  "status": zod.string(),
-  "amount": zod.number(),
-  "credited_amount": zod.number().optional(),
-  "fee_amount": zod.number().optional(),
+  "status": zod.string().describe('pending | success | failed'),
+  "amount": zod.number().describe('Gross collected amount'),
+  "credited_amount": zod.number().optional().describe('Net amount credited after fees'),
+  "fee_amount": zod.number().optional().describe('Platform fee deducted'),
   "currency": zod.string(),
   "phone": zod.string().optional(),
-  "created_at": zod.string().optional(),
-  "confirmed_at": zod.string().optional()
+  "created_at": zod.coerce.date().optional(),
+  "confirmed_at": zod.coerce.date().optional()
 })
 
 
 /**
+ * Called by Ashtech Pay when a transaction reaches a final state.
+Always respond HTTP 200 immediately, then process business logic.
+The amount field is the net amount (after fees). total_amount is the gross collected amount.
+
  * @summary Receive payment webhook events
  */
 export const HandleWebhookBody = zod.object({
-  "event": zod.string(),
+  "event": zod.string().describe('payment.completed | payment.failed | payout.completed | payout.failed'),
   "transaction_id": zod.string(),
   "reference": zod.string().optional(),
   "status": zod.string().optional(),
-  "amount": zod.number().optional(),
-  "total_amount": zod.number().optional(),
+  "amount": zod.number().optional().describe('Net amount after platform fees'),
+  "total_amount": zod.number().optional().describe('Gross collected amount (before fees)'),
   "currency": zod.string().optional(),
   "phone": zod.string().optional(),
-  "timestamp": zod.string().optional()
-})
+  "timestamp": zod.coerce.date().optional()
+}).describe('Event sent by Ashtech Pay when a transaction reaches a final state.\nEvents: payment.completed, payment.failed, payout.completed, payout.failed\nNote: amount = net after fees, total_amount = gross collected\n')
 
 export const HandleWebhookResponse = zod.object({
   "received": zod.boolean()

@@ -9,12 +9,16 @@
 export interface TransactionResponse {
   transaction_id: string;
   reference?: string;
+  /** pending | success | failed */
   status: string;
+  /** Gross collected amount */
   amount: number;
+  /** Net amount credited after fees */
   credited_amount?: number;
+  /** Platform fee deducted */
   fee_amount?: number;
   currency: string;
   phone?: string;
-  created_at?: string;
-  confirmed_at?: string;
+  created_at?: Date;
+  confirmed_at?: Date;
 }

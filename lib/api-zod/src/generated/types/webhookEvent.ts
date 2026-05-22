@@ -6,14 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Event sent by Ashtech Pay when a transaction reaches a final state.
+Events: payment.completed, payment.failed, payout.completed, payout.failed
+Note: amount = net after fees, total_amount = gross collected
+
+ */
 export interface WebhookEvent {
+  /** payment.completed | payment.failed | payout.completed | payout.failed */
   event: string;
   transaction_id: string;
   reference?: string;
   status?: string;
+  /** Net amount after platform fees */
   amount?: number;
+  /** Gross collected amount (before fees) */
   total_amount?: number;
   currency?: string;
   phone?: string;
-  timestamp?: string;
+  timestamp?: Date;
 }

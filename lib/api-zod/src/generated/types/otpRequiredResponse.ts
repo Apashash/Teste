@@ -7,7 +7,9 @@
  */
 
 export interface OtpRequiredResponse {
+  /** Always otp_required */
   error: string;
   message: string;
-  ussd_code?: string;
+  /** USSD code to dial (OTP USSD flow, Orange BF only). Null for OTP SMS flow. */
+  ussd_code?: string | null;
 }

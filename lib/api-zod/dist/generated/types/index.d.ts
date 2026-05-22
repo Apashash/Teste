@@ -5,7 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-
 export * from './collectRequest';
 export * from './collectResponse';
 export * from './countriesResponse';
@@ -18,3 +17,4 @@ export * from './healthStatus';
 export * from './otpRequiredResponse';
 export * from './transactionResponse';
 export * from './webhookEvent';
+//# sourceMappingURL=index.d.ts.map

@@ -7,13 +7,22 @@
  */
 
 export interface CollectRequest {
+  /** Gross amount to collect */
   amount: number;
+  /** Country currency (XAF, XOF, GNF, CDF…) */
   currency: string;
+  /** Payer phone number */
   phone: string;
+  /** Exact operator name from /countries (e.g. MTN Mobile Money) */
   operator: string;
+  /** ISO country code (CM, SN, CI…) */
   country_code: string;
+  /** Payer full name (optional, not forwarded to Ashtech Pay) */
   customer_name?: string;
+  /** Your unique order reference */
   reference?: string;
+  /** OTP code if required (see 400 otp_required response) */
   otp?: string;
+  /** Webhook URL to receive the payment result */
   notify_url?: string;
 }

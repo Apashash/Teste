@@ -9,11 +9,17 @@
 export interface CollectResponse {
   transaction_id: string;
   reference?: string;
+  /** pending | success | failed */
   status: string;
+  /** Gross collected amount */
   amount: number;
+  /** Net amount credited after platform fees */
   credited_amount?: number;
+  /** Platform fee deducted */
   fee_amount?: number;
   currency: string;
+  /** Payment flow: wave | ussd_push | otp_sms | otp_ussd */
   flow?: string;
+  /** Wave payment URL (only present when flow=wave) */
   wave_url?: string;
 }

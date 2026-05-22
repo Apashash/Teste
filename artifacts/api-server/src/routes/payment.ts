@@ -20,7 +20,7 @@ const COUNTRIES_FALLBACK = {
     { name: "Cameroun", code: "CM", currency: "XAF", operators: ["MTN Mobile Money", "Orange Money"] },
     { name: "Centrafrique", code: "CF", currency: "XAF", operators: ["Orange Money"] },
     { name: "Congo", code: "CG", currency: "XAF", operators: ["Airtel Money", "MTN Mobile Money"] },
-    { name: "Côte d'Ivoire", code: "CI", currency: "XOF", operators: ["Moov Money", "MTN", "Orange Money", "Wave"] },
+    { name: "Côte d'Ivoire", code: "CI", currency: "XOF", operators: ["Moov Money", "MTN Mobile Money", "Orange Money", "Wave"] },
     { name: "Gabon", code: "GA", currency: "XAF", operators: ["Airtel Money", "Moov Money"] },
     { name: "Guinée Conakry", code: "GN", currency: "GNF", operators: ["MTN Mobile Money", "Orange Money"] },
     { name: "Guinée Équatoriale", code: "GQ", currency: "XAF", operators: ["Orange Money"] },
@@ -96,6 +96,76 @@ router.get("/countries", async (req, res): Promise<void> => {
     req.log.warn({ err }, "Ashtech Pay unreachable, using fallback countries");
     res.json(COUNTRIES_FALLBACK);
   }
+});
+
+router.get("/fees", async (req, res): Promise<void> => {
+  if (!ASHTECH_API_KEY) {
+    req.log.error("ASHTECH_PAY_API_KEY is not configured");
+    res.status(500).json({
+      error: "configuration_error",
+      message: "Clé API non configurée. Contactez l'administrateur.",
+    });
+    return;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${ASHTECH_BASE}/v1/fees`, {
+      headers: ashtechHeaders(),
+    });
+  } catch (err) {
+    req.log.error({ err }, "Network error reaching Ashtech Pay fees");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: 0,
+      contentType: null,
+      isJson: false,
+      responseBody: String(err),
+      note: "Erreur réseau — serveur AshtechPay injoignable (fees)",
+    });
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Impossible de joindre le serveur de paiement.",
+    });
+    return;
+  }
+
+  const { data, rawText } = await safeParseJson(response);
+  const contentType = response.headers.get("content-type");
+
+  if (data === null) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: response.status,
+      contentType,
+      isJson: false,
+      responseBody: rawText.slice(0, 1000),
+      note: response.status === 403
+        ? "Cloudflare bloque la requête (403) — IP serveur non whitelistée"
+        : "Réponse non-JSON reçue pour les frais",
+    });
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Réponse invalide du serveur de paiement.",
+    });
+    return;
+  }
+
+  if (!response.ok) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "GET /v1/fees",
+      httpStatus: response.status,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1000),
+      note: `Erreur AshtechPay sur fees : ${response.status}`,
+    });
+  }
+
+  res.status(response.ok ? 200 : response.status).json(data);
 });
 
 router.post("/collect", async (req, res): Promise<void> => {
@@ -213,6 +283,70 @@ router.post("/collect", async (req, res): Promise<void> => {
     return;
   }
 
+  if (response.status === 403) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 403,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Accès interdit (403) — cette transaction n'appartient pas à ce compte",
+    });
+    res.status(403).json(data);
+    return;
+  }
+
+  if (response.status === 404) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 404,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Transaction introuvable (404)",
+    });
+    res.status(404).json(data);
+    return;
+  }
+
+  if (response.status === 422) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 422,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Pays ou opérateur non supporté / devise incorrecte (422)",
+    });
+    res.status(422).json(data);
+    return;
+  }
+
+  if (response.status === 429) {
+    req.log.warn({ status: 429 }, "Ashtech Pay rate limit reached");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 429,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Trop de requêtes (429) — ralentir les appels",
+    });
+    res.status(429).json({
+      error: "rate_limited",
+      message: "Trop de requêtes. Veuillez patienter avant de réessayer.",
+    });
+    return;
+  }
+
   req.log.error({ status: response.status, data }, "Unexpected status from Ashtech Pay collect");
   logAshtechError({
     timestamp: new Date().toISOString(),
@@ -279,6 +413,43 @@ router.get("/transaction/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  if (response.status === 404) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: 404,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1000),
+      note: "Transaction introuvable (404)",
+    });
+    res.status(404).json(data);
+    return;
+  }
+
+  if (response.status === 403) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: 403,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1000),
+      note: "Accès interdit (403) — cette transaction n'appartient pas à ce compte",
+    });
+    res.status(403).json(data);
+    return;
+  }
+
+  if (response.status === 429) {
+    req.log.warn({ status: 429 }, "Ashtech Pay rate limit on transaction check");
+    res.status(429).json({
+      error: "rate_limited",
+      message: "Trop de requêtes. Veuillez patienter avant de réessayer.",
+    });
+    return;
+  }
+
   if (!response.ok) {
     logAshtechError({
       timestamp: new Date().toISOString(),
@@ -303,12 +474,15 @@ router.post("/webhook", async (req, res): Promise<void> => {
     return;
   }
 
-  const { event, transaction_id, reference, amount, currency } = parsed.data;
+  const { event, transaction_id, reference, amount, total_amount, currency, phone } = parsed.data;
 
-  logger.info({ event, transaction_id, reference, amount, currency }, "Webhook received");
+  logger.info({ event, transaction_id, reference, amount, total_amount, currency, phone }, "Webhook received");
 
   if (event === "payment.completed") {
-    logger.info({ transaction_id, reference, amount, currency }, "Payment completed");
+    logger.info(
+      { transaction_id, reference, amount, total_amount, currency },
+      "Payment completed — net credited: " + amount + " " + currency + " (gross: " + total_amount + ")"
+    );
   } else if (event === "payment.failed") {
     logger.warn({ transaction_id, reference }, "Payment failed");
   } else if (event === "payout.completed") {

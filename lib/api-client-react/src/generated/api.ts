@@ -24,6 +24,7 @@ import type {
   CollectResponse,
   CountriesResponse,
   ErrorResponse,
+  FeesResponse,
   HandleWebhook200,
   HealthStatus,
   OtpRequiredResponse,
@@ -199,6 +200,84 @@ export function useGetCountries<TData = Awaited<ReturnType<typeof getCountries>>
 
 
 
+export const getGetFeesUrl = () => {
+
+
+
+
+  return `/api/fees`
+}
+
+/**
+ * Returns the platform fee rates in real time. Use credited_amount from /collect for the exact net amount per transaction.
+ * @summary Get current fee rates
+ */
+export const getFees = async ( options?: RequestInit): Promise<FeesResponse> => {
+
+  return customFetch<FeesResponse>(getGetFeesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFeesQueryKey = () => {
+    return [
+    `/api/fees`
+    ] as const;
+    }
+
+
+export const getGetFeesQueryOptions = <TData = Awaited<ReturnType<typeof getFees>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFeesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFees>>> = ({ signal }) => getFees({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFees>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetFeesQueryResult = NonNullable<Awaited<ReturnType<typeof getFees>>>
+export type GetFeesQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get current fee rates
+ */
+
+export function useGetFees<TData = Awaited<ReturnType<typeof getFees>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFees>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetFeesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+
+
+
+
+
+
 export const getInitiatePaymentUrl = () => {
 
 
@@ -208,7 +287,15 @@ export const getInitiatePaymentUrl = () => {
 }
 
 /**
- * Initiates a payment and returns the transaction status
+ * Initiates a payment and returns the transaction status.
+The platform fees are deducted automatically — credited_amount is the net amount credited.
+
+Flow detection:
+- 202 + flow="wave": Wave payment — display wave_url as button/QR code
+- 202 (no wave): USSD Push — wait for webhook, client validates on phone
+- 400 + error="otp_required" + ussd_code: OTP USSD (Orange BF) — client dials USSD code then sends OTP
+- 400 + error="otp_required" + ussd_code=null: OTP SMS — client receives SMS OTP, re-submit with otp field
+
  * @summary Initiate a Mobile Money payment
  */
 export const initiatePayment = async (collectRequest: CollectRequest, options?: RequestInit): Promise<CollectResponse> => {
@@ -280,7 +367,7 @@ export const getGetTransactionUrl = (id: string,) => {
 }
 
 /**
- * Returns the current status of a transaction
+ * Returns the current status of a transaction by its transaction_id
  * @summary Get transaction status
  */
 export const getTransaction = async (id: string, options?: RequestInit): Promise<TransactionResponse> => {
@@ -358,6 +445,10 @@ export const getHandleWebhookUrl = () => {
 }
 
 /**
+ * Called by Ashtech Pay when a transaction reaches a final state.
+Always respond HTTP 200 immediately, then process business logic.
+The amount field is the net amount (after fees). total_amount is the gross collected amount.
+
  * @summary Receive payment webhook events
  */
 export const handleWebhook = async (webhookEvent: WebhookEvent, options?: RequestInit): Promise<HandleWebhook200> => {
