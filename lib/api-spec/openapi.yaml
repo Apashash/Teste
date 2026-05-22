@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: payment
+    description: Payment operations via Ashtech Pay
 paths:
   /healthz:
     get:
@@ -24,6 +26,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /countries:
+    get:
+      operationId: getCountries
+      tags: [payment]
+      summary: Get available countries and operators
+      description: Returns the list of active countries and their Mobile Money operators
+      responses:
+        "200":
+          description: List of countries and operators
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CountriesResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /collect:
+    post:
+      operationId: initiatePayment
+      tags: [payment]
+      summary: Initiate a Mobile Money payment
+      description: Initiates a payment and returns the transaction status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CollectRequest"
+      responses:
+        "202":
+          description: Payment initiated (USSD Push or Wave)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectResponse"
+        "400":
+          description: OTP required or bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtpRequiredResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /transaction/{id}:
+    get:
+      operationId: getTransaction
+      tags: [payment]
+      summary: Get transaction status
+      description: Returns the current status of a transaction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionResponse"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhook:
+    post:
+      operationId: handleWebhook
+      tags: [payment]
+      summary: Receive payment webhook events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEvent"
+      responses:
+        "200":
+          description: Webhook received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                required:
+                  - received
 components:
   schemas:
     HealthStatus:
@@ -33,4 +133,157 @@ components:
           type: string
       required:
         - status
-
+    Country:
+      type: object
+      properties:
+        name:
+          type: string
+        code:
+          type: string
+        currency:
+          type: string
+        operators:
+          type: array
+          items:
+            type: string
+      required:
+        - name
+        - code
+        - currency
+        - operators
+    CountriesResponse:
+      type: object
+      properties:
+        countries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Country"
+      required:
+        - countries
+    CollectRequest:
+      type: object
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+        phone:
+          type: string
+        operator:
+          type: string
+        country_code:
+          type: string
+        customer_name:
+          type: string
+        reference:
+          type: string
+        otp:
+          type: string
+        notify_url:
+          type: string
+      required:
+        - amount
+        - currency
+        - phone
+        - operator
+        - country_code
+    CollectResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        reference:
+          type: string
+        status:
+          type: string
+        amount:
+          type: number
+        credited_amount:
+          type: number
+        fee_amount:
+          type: number
+        currency:
+          type: string
+        flow:
+          type: string
+        wave_url:
+          type: string
+      required:
+        - transaction_id
+        - status
+        - amount
+        - currency
+    OtpRequiredResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        ussd_code:
+          type: string
+      required:
+        - error
+        - message
+    TransactionResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        reference:
+          type: string
+        status:
+          type: string
+        amount:
+          type: number
+        credited_amount:
+          type: number
+        fee_amount:
+          type: number
+        currency:
+          type: string
+        phone:
+          type: string
+        created_at:
+          type: string
+        confirmed_at:
+          type: string
+      required:
+        - transaction_id
+        - status
+        - amount
+        - currency
+    WebhookEvent:
+      type: object
+      properties:
+        event:
+          type: string
+        transaction_id:
+          type: string
+        reference:
+          type: string
+        status:
+          type: string
+        amount:
+          type: number
+        total_amount:
+          type: number
+        currency:
+          type: string
+        phone:
+          type: string
+        timestamp:
+          type: string
+      required:
+        - event
+        - transaction_id
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
