@@ -6,6 +6,7 @@ import {
   HandleWebhookBody,
 } from "@workspace/api-zod";
 import { logger } from "../lib/logger";
+import { logAshtechError } from "../lib/ashtech-logger";
 
 const router: IRouter = Router();
 
@@ -47,16 +48,18 @@ function ashtechHeaders() {
   };
 }
 
-async function safeParseJson(response: Response): Promise<unknown | null> {
+async function safeParseJson(
+  response: Response
+): Promise<{ data: unknown | null; rawText: string }> {
   const text = await response.text();
   const trimmed = text.trim();
   if (!trimmed || trimmed.startsWith("<")) {
-    return null;
+    return { data: null, rawText: text };
   }
   try {
-    return JSON.parse(trimmed);
+    return { data: JSON.parse(trimmed), rawText: text };
   } catch {
-    return null;
+    return { data: null, rawText: text };
   }
 }
 
@@ -67,7 +70,7 @@ router.get("/countries", async (req, res): Promise<void> => {
     });
 
     if (response.ok) {
-      const data = await safeParseJson(response);
+      const { data } = await safeParseJson(response);
       if (data) {
         const parsed = GetCountriesResponse.safeParse(data);
         if (parsed.success) {
@@ -76,6 +79,16 @@ router.get("/countries", async (req, res): Promise<void> => {
         }
       }
     }
+
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "GET /v1/countries",
+      httpStatus: response.status,
+      contentType: response.headers.get("content-type"),
+      isJson: false,
+      responseBody: "(non-JSON ou invalide)",
+      note: "Fallback utilisé pour les pays",
+    });
 
     req.log.warn({ status: response.status }, "Ashtech Pay countries unavailable, using fallback");
     res.json(COUNTRIES_FALLBACK);
@@ -115,6 +128,16 @@ router.post("/collect", async (req, res): Promise<void> => {
     });
   } catch (err) {
     req.log.error({ err }, "Network error reaching Ashtech Pay");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 0,
+      contentType: null,
+      isJson: false,
+      responseBody: String(err),
+      requestBody: ashtechBody,
+      note: "Erreur réseau — serveur AshtechPay injoignable",
+    });
     res.status(502).json({
       error: "gateway_error",
       message: "Impossible de joindre le serveur de paiement. Veuillez réessayer.",
@@ -122,13 +145,27 @@ router.post("/collect", async (req, res): Promise<void> => {
     return;
   }
 
-  const data = await safeParseJson(response);
+  const { data, rawText } = await safeParseJson(response);
+  const contentType = response.headers.get("content-type");
+  const isJson = !!data;
 
   if (data === null) {
     req.log.error(
       { status: response.status },
       "Ashtech Pay returned non-JSON response (possible Cloudflare block)"
     );
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: response.status,
+      contentType,
+      isJson: false,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: response.status === 403
+        ? "Cloudflare bloque la requête (403) — IP serveur non whitelistée"
+        : "Réponse non-JSON reçue d'AshtechPay",
+    });
     res.status(502).json({
       error: "gateway_error",
       message:
@@ -143,12 +180,32 @@ router.post("/collect", async (req, res): Promise<void> => {
   }
 
   if (response.status === 400) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 400,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Requête rejetée par AshtechPay (400) — voir responseBody pour le détail",
+    });
     res.status(400).json(data);
     return;
   }
 
   if (response.status === 401) {
     req.log.error({ status: 401 }, "Ashtech Pay API key rejected");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: "POST /v1/collect",
+      httpStatus: 401,
+      contentType,
+      isJson,
+      responseBody: rawText.slice(0, 1000),
+      requestBody: ashtechBody,
+      note: "Clé API rejetée (401) — vérifier ASHTECH_PAY_API_KEY",
+    });
     res.status(502).json({
       error: "auth_error",
       message: "Clé API invalide ou révoquée. Contactez l'administrateur.",
@@ -157,6 +214,16 @@ router.post("/collect", async (req, res): Promise<void> => {
   }
 
   req.log.error({ status: response.status, data }, "Unexpected status from Ashtech Pay collect");
+  logAshtechError({
+    timestamp: new Date().toISOString(),
+    endpoint: "POST /v1/collect",
+    httpStatus: response.status,
+    contentType,
+    isJson,
+    responseBody: rawText.slice(0, 1000),
+    requestBody: ashtechBody,
+    note: `Statut inattendu d'AshtechPay : ${response.status}`,
+  });
   res.status(response.status >= 100 && response.status < 600 ? response.status : 502).json(data);
 });
 
@@ -175,6 +242,15 @@ router.get("/transaction/:id", async (req, res): Promise<void> => {
     );
   } catch (err) {
     req.log.error({ err }, "Network error reaching Ashtech Pay");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: 0,
+      contentType: null,
+      isJson: false,
+      responseBody: String(err),
+      note: "Erreur réseau lors de la vérification de transaction",
+    });
     res.status(502).json({
       error: "gateway_error",
       message: "Impossible de joindre le serveur de paiement.",
@@ -182,14 +258,37 @@ router.get("/transaction/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const data = await safeParseJson(response);
+  const { data, rawText } = await safeParseJson(response);
+  const contentType = response.headers.get("content-type");
+
   if (data === null) {
     req.log.error({ status: response.status }, "Ashtech Pay returned non-JSON for transaction");
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: response.status,
+      contentType,
+      isJson: false,
+      responseBody: rawText.slice(0, 1000),
+      note: "Réponse non-JSON pour la vérification de transaction",
+    });
     res.status(502).json({
       error: "gateway_error",
       message: "Réponse invalide du serveur de paiement.",
     });
     return;
+  }
+
+  if (!response.ok) {
+    logAshtechError({
+      timestamp: new Date().toISOString(),
+      endpoint: `GET /v1/transaction/${parsed.data.id}`,
+      httpStatus: response.status,
+      contentType,
+      isJson: true,
+      responseBody: rawText.slice(0, 1000),
+      note: `Erreur AshtechPay sur transaction : ${response.status}`,
+    });
   }
 
   res.status(response.ok ? 200 : response.status).json(data);
