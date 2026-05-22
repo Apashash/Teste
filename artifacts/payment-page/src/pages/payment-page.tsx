@@ -2,13 +2,13 @@ import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { 
-  useGetCountries, 
-  useInitiatePayment, 
+import {
+  useGetCountries,
+  useInitiatePayment,
   useGetTransaction,
-  getGetTransactionQueryKey
+  getGetTransactionQueryKey,
 } from "@workspace/api-client-react";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,32 +25,29 @@ const paymentSchema = z.object({
 
 type PaymentFormValues = z.infer<typeof paymentSchema>;
 
-type FlowState = 
-  | "form" 
-  | "review" 
-  | "pending" 
-  | "wave" 
-  | "otp-sms" 
-  | "otp-ussd" 
-  | "success" 
+type FlowState =
+  | "form"
+  | "review"
+  | "pending"
+  | "wave"
+  | "otp-sms"
+  | "otp-ussd"
+  | "success"
   | "failed";
 
 export default function PaymentPage() {
   const { data: countriesData, isLoading: isLoadingCountries } = useGetCountries();
   const initiatePayment = useInitiatePayment();
-  
+
   const [flowState, setFlowState] = useState<FlowState>("form");
   const [transactionId, setTransactionId] = useState<string | null>(null);
   const [reviewData, setReviewData] = useState<PaymentFormValues | null>(null);
-  
-  // OTP related
+
   const [otpCode, setOtpCode] = useState("");
   const [ussdCode, setUssdCode] = useState<string | null>(null);
   const [waveUrl, setWaveUrl] = useState<string | null>(null);
-  
-  // Final state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  
+
   const form = useForm<PaymentFormValues>({
     resolver: zodResolver(paymentSchema),
     defaultValues: {
@@ -63,30 +60,26 @@ export default function PaymentPage() {
   });
 
   const selectedCountryCode = form.watch("country_code");
-  const selectedCountry = countriesData?.countries.find(c => c.code === selectedCountryCode);
-  
-  // Reset operator when country changes
+  const selectedCountry = countriesData?.countries.find((c) => c.code === selectedCountryCode);
+
   useEffect(() => {
     form.setValue("operator", "");
   }, [selectedCountryCode, form]);
 
-  const { data: transactionData } = useGetTransaction(
-    transactionId || "", 
-    { 
-      query: { 
-        enabled: !!transactionId && (flowState === "pending" || flowState === "wave"),
-        refetchInterval: 5000,
-        queryKey: getGetTransactionQueryKey(transactionId || "")
-      }
-    }
-  );
+  const { data: transactionData } = useGetTransaction(transactionId || "", {
+    query: {
+      enabled: !!transactionId && (flowState === "pending" || flowState === "wave"),
+      refetchInterval: 5000,
+      queryKey: getGetTransactionQueryKey(transactionId || ""),
+    },
+  });
 
   useEffect(() => {
     if (transactionData) {
       if (transactionData.status === "success") {
         setFlowState("success");
       } else if (transactionData.status === "failed") {
-        setErrorMessage("Le paiement a échoué. Veuillez réessayer.");
+        setErrorMessage("Le paiement a échoué ou a expiré. Veuillez réessayer.");
         setFlowState("failed");
       }
     }
@@ -99,49 +92,56 @@ export default function PaymentPage() {
 
   const handleInitiatePayment = (otp?: string) => {
     if (!reviewData) return;
-    
     setErrorMessage(null);
-    
-    initiatePayment.mutate({
-      data: {
-        amount: reviewData.amount,
-        currency: selectedCountry?.currency || "XOF",
-        phone: reviewData.phone,
-        operator: reviewData.operator,
-        country_code: reviewData.country_code,
-        customer_name: reviewData.customer_name,
-        ...(otp && { otp }),
-      }
-    }, {
-      onSuccess: (res) => {
-        setTransactionId(res.transaction_id);
-        
-        if (res.flow === "wave" && res.wave_url) {
-          setWaveUrl(res.wave_url);
-          setFlowState("wave");
-        } else if (res.status === "success") {
-          setFlowState("success");
-        } else {
-          // Default to ussd push / pending
-          setFlowState("pending");
-        }
+
+    initiatePayment.mutate(
+      {
+        data: {
+          amount: reviewData.amount,
+          currency: selectedCountry?.currency || "XOF",
+          phone: reviewData.phone,
+          operator: reviewData.operator,
+          country_code: reviewData.country_code,
+          customer_name: reviewData.customer_name,
+          ...(otp && { otp }),
+        },
       },
-      onError: (err: any) => {
-        const errorData = err.response?.data || err;
-        
-        if (err.response?.status === 400 && errorData?.error === "otp_required") {
-          if (errorData.ussd_code) {
-            setUssdCode(errorData.ussd_code);
-            setFlowState("otp-ussd");
+      {
+        onSuccess: (res) => {
+          setTransactionId(res.transaction_id);
+
+          if (res.flow === "wave" && res.wave_url) {
+            setWaveUrl(res.wave_url);
+            setFlowState("wave");
+          } else if (res.status === "success") {
+            setFlowState("success");
           } else {
-            setFlowState("otp-sms");
+            setFlowState("pending");
           }
-        } else {
-          setErrorMessage(errorData?.message || "Une erreur est survenue lors de l'initiation du paiement.");
-          setFlowState("failed");
-        }
+        },
+        onError: (err: unknown) => {
+          const apiErr = err as { response?: { status?: number; data?: { error?: string; message?: string; ussd_code?: string } } };
+          const errorData = apiErr?.response?.data;
+          const status = apiErr?.response?.status;
+
+          if (status === 400 && errorData?.error === "otp_required") {
+            if (errorData.ussd_code) {
+              setUssdCode(errorData.ussd_code);
+              setFlowState("otp-ussd");
+            } else {
+              setFlowState("otp-sms");
+            }
+          } else {
+            const msg =
+              errorData?.message ||
+              (err instanceof Error ? err.message : null) ||
+              "Une erreur est survenue lors de l'initiation du paiement.";
+            setErrorMessage(msg);
+            setFlowState("failed");
+          }
+        },
       }
-    });
+    );
   };
 
   const resetFlow = () => {
@@ -156,7 +156,6 @@ export default function PaymentPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 text-primary mb-4">
             <ShieldCheck className="w-6 h-6" />
@@ -166,7 +165,7 @@ export default function PaymentPage() {
         </div>
 
         <Card className="border-0 shadow-xl shadow-slate-200/50">
-          
+
           {flowState === "form" && (
             <>
               <CardHeader>
@@ -181,7 +180,6 @@ export default function PaymentPage() {
                 ) : (
                   <Form {...form}>
                     <form onSubmit={form.handleSubmit(onSubmitForm)} className="space-y-4">
-                      
                       <FormField
                         control={form.control}
                         name="customer_name"
@@ -189,7 +187,7 @@ export default function PaymentPage() {
                           <FormItem>
                             <FormLabel>Nom complet</FormLabel>
                             <FormControl>
-                              <Input placeholder="Jean Dupont" data-testid="input-name" {...field} />
+                              <Input placeholder="Jean Dupont" {...field} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -203,7 +201,7 @@ export default function PaymentPage() {
                           <FormItem>
                             <FormLabel>Montant</FormLabel>
                             <FormControl>
-                              <Input type="number" placeholder="1000" data-testid="input-amount" {...field} />
+                              <Input type="number" placeholder="1000" {...field} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -218,12 +216,12 @@ export default function PaymentPage() {
                             <FormLabel>Pays</FormLabel>
                             <Select onValueChange={field.onChange} defaultValue={field.value}>
                               <FormControl>
-                                <SelectTrigger data-testid="select-country">
+                                <SelectTrigger>
                                   <SelectValue placeholder="Sélectionnez un pays" />
                                 </SelectTrigger>
                               </FormControl>
                               <SelectContent>
-                                {countriesData?.countries.map(country => (
+                                {countriesData?.countries.map((country) => (
                                   <SelectItem key={country.code} value={country.code}>
                                     {country.name} ({country.currency})
                                   </SelectItem>
@@ -244,13 +242,15 @@ export default function PaymentPage() {
                               <FormLabel>Opérateur</FormLabel>
                               <Select onValueChange={field.onChange} defaultValue={field.value}>
                                 <FormControl>
-                                  <SelectTrigger data-testid="select-operator">
+                                  <SelectTrigger>
                                     <SelectValue placeholder="Sélectionnez un opérateur" />
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  {selectedCountry.operators.map(op => (
-                                    <SelectItem key={op} value={op}>{op}</SelectItem>
+                                  {selectedCountry.operators.map((op) => (
+                                    <SelectItem key={op} value={op}>
+                                      {op}
+                                    </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
@@ -267,14 +267,14 @@ export default function PaymentPage() {
                           <FormItem>
                             <FormLabel>Numéro de téléphone</FormLabel>
                             <FormControl>
-                              <Input placeholder="Ex: 01234567" data-testid="input-phone" {...field} />
+                              <Input placeholder="Ex: 670000000" {...field} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
                       />
 
-                      <Button type="submit" className="w-full mt-6" data-testid="button-submit-form">
+                      <Button type="submit" className="w-full mt-6">
                         Continuer
                         <ArrowRight className="w-4 h-4 ml-2" />
                       </Button>
@@ -299,7 +299,9 @@ export default function PaymentPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Montant</span>
-                    <span className="font-medium text-lg text-primary">{reviewData.amount} {selectedCountry?.currency}</span>
+                    <span className="font-medium text-lg text-primary">
+                      {reviewData.amount} {selectedCountry?.currency}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Téléphone</span>
@@ -307,23 +309,27 @@ export default function PaymentPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Opérateur</span>
-                    <span className="font-medium uppercase">{reviewData.operator}</span>
+                    <span className="font-medium">{reviewData.operator}</span>
                   </div>
                 </div>
 
                 <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="w-full" onClick={() => setFlowState("form")} disabled={initiatePayment.isPending}>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setFlowState("form")}
+                    disabled={initiatePayment.isPending}
+                  >
                     Modifier
                   </Button>
-                  <Button 
-                    className="w-full" 
+                  <Button
+                    className="w-full"
                     onClick={() => handleInitiatePayment()}
                     disabled={initiatePayment.isPending}
-                    data-testid="button-pay-now"
                   >
-                    {initiatePayment.isPending ? (
+                    {initiatePayment.isPending && (
                       <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    ) : null}
+                    )}
                     Payer maintenant
                   </Button>
                 </div>
@@ -334,13 +340,15 @@ export default function PaymentPage() {
           {flowState === "pending" && (
             <CardContent className="py-12 text-center flex flex-col items-center space-y-4">
               <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping"></div>
+                <div className="absolute inset-0 bg-primary/20 rounded-full animate-ping" />
                 <div className="relative bg-white rounded-full p-4 shadow-sm">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
               </div>
               <h3 className="text-lg font-semibold mt-4">En attente de validation</h3>
-              <p className="text-slate-500 text-sm">Validez le paiement sur votre téléphone. Cette page s'actualisera automatiquement.</p>
+              <p className="text-slate-500 text-sm">
+                Validez le paiement sur votre téléphone. Cette page s'actualisera automatiquement.
+              </p>
             </CardContent>
           )}
 
@@ -348,7 +356,9 @@ export default function PaymentPage() {
             <CardContent className="py-10 text-center flex flex-col items-center space-y-6">
               <div className="bg-slate-50 p-6 rounded-2xl w-full">
                 <h3 className="text-lg font-semibold mb-2">Paiement via Wave</h3>
-                <p className="text-slate-500 text-sm mb-6">Cliquez sur le bouton ci-dessous pour ouvrir l'application Wave et valider votre paiement.</p>
+                <p className="text-slate-500 text-sm mb-6">
+                  Cliquez sur le bouton ci-dessous pour ouvrir l'application Wave et valider votre paiement.
+                </p>
                 <a href={waveUrl} target="_blank" rel="noopener noreferrer" className="block w-full">
                   <Button className="w-full h-14 text-lg bg-[#1c55ff] hover:bg-[#1c55ff]/90 text-white rounded-xl">
                     Payer avec Wave
@@ -373,29 +383,31 @@ export default function PaymentPage() {
                     <p className="text-sm text-slate-600 mt-2">puis entrez le code reçu par SMS.</p>
                   </div>
                 ) : (
-                  <p className="text-slate-500 text-sm">Un code OTP a été envoyé par SMS à votre numéro.</p>
+                  <p className="text-slate-500 text-sm">
+                    Un code OTP a été envoyé par SMS à votre numéro.
+                  </p>
                 )}
               </div>
 
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Code OTP</label>
-                  <Input 
-                    type="text" 
-                    placeholder="Entrez le code" 
+                  <Input
+                    type="text"
+                    placeholder="Entrez le code"
                     value={otpCode}
                     onChange={(e) => setOtpCode(e.target.value)}
-                    data-testid="input-otp"
                     className="text-center text-lg tracking-widest h-12"
                   />
                 </div>
-                <Button 
-                  className="w-full h-12" 
+                <Button
+                  className="w-full h-12"
                   onClick={() => handleInitiatePayment(otpCode)}
                   disabled={!otpCode || initiatePayment.isPending}
-                  data-testid="button-submit-otp"
                 >
-                  {initiatePayment.isPending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                  {initiatePayment.isPending && (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  )}
                   Valider
                 </Button>
               </div>
@@ -411,21 +423,24 @@ export default function PaymentPage() {
                 <h3 className="text-2xl font-bold text-slate-900">Paiement réussi !</h3>
                 <p className="text-slate-500 mt-1">Merci pour votre confiance.</p>
               </div>
-              
+
               <div className="bg-slate-50 rounded-lg p-4 text-sm text-left space-y-3">
                 <div className="flex justify-between border-b pb-2">
                   <span className="text-slate-500">ID Transaction</span>
-                  <span className="font-mono font-medium">{transactionData?.transaction_id || transactionId}</span>
+                  <span className="font-mono font-medium text-xs">
+                    {transactionData?.transaction_id || transactionId}
+                  </span>
                 </div>
                 <div className="flex justify-between border-b pb-2">
                   <span className="text-slate-500">Montant</span>
                   <span className="font-medium text-emerald-600">
-                    {transactionData?.amount || reviewData?.amount} {transactionData?.currency || selectedCountry?.currency}
+                    {transactionData?.amount || reviewData?.amount}{" "}
+                    {transactionData?.currency || selectedCountry?.currency}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Statut</span>
-                  <span className="font-medium capitalize text-emerald-600">Success</span>
+                  <span className="font-medium text-emerald-600">Succès</span>
                 </div>
               </div>
 
@@ -442,16 +457,15 @@ export default function PaymentPage() {
               </div>
               <div>
                 <h3 className="text-2xl font-bold text-slate-900">Paiement échoué</h3>
-                <p className="text-red-500 mt-2">{errorMessage || "Une erreur est survenue"}</p>
+                <p className="text-red-500 mt-2 text-sm leading-relaxed">{errorMessage || "Une erreur est survenue"}</p>
               </div>
               <Button onClick={resetFlow} className="w-full">
                 Réessayer
               </Button>
             </CardContent>
           )}
-
         </Card>
-        
+
         <div className="mt-8 text-center text-xs text-slate-400">
           <p>Paiement sécurisé par AshtechPay &copy; 2025</p>
         </div>

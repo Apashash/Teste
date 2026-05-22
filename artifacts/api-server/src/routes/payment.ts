@@ -37,10 +37,27 @@ function ashtechHeaders() {
   return {
     Authorization: `Bearer ${ASHTECH_API_KEY}`,
     "Content-Type": "application/json",
-    "Accept": "application/json",
-    "User-Agent": "Mozilla/5.0 (compatible; AshtechPayClient/1.0)",
+    Accept: "application/json",
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
     "Cache-Control": "no-cache",
+    Origin: "https://ashtechpay.top",
+    Referer: "https://ashtechpay.top/",
   };
+}
+
+async function safeParseJson(response: Response): Promise<unknown | null> {
+  const text = await response.text();
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.startsWith("<")) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 router.get("/countries", async (req, res): Promise<void> => {
@@ -50,11 +67,13 @@ router.get("/countries", async (req, res): Promise<void> => {
     });
 
     if (response.ok) {
-      const data = await response.json();
-      const parsed = GetCountriesResponse.safeParse(data);
-      if (parsed.success) {
-        res.json(parsed.data);
-        return;
+      const data = await safeParseJson(response);
+      if (data) {
+        const parsed = GetCountriesResponse.safeParse(data);
+        if (parsed.success) {
+          res.json(parsed.data);
+          return;
+        }
       }
     }
 
@@ -67,6 +86,15 @@ router.get("/countries", async (req, res): Promise<void> => {
 });
 
 router.post("/collect", async (req, res): Promise<void> => {
+  if (!ASHTECH_API_KEY) {
+    req.log.error("ASHTECH_PAY_API_KEY is not configured");
+    res.status(500).json({
+      error: "configuration_error",
+      message: "Clé API non configurée. Contactez l'administrateur.",
+    });
+    return;
+  }
+
   const parsed = InitiatePaymentBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -78,31 +106,58 @@ router.post("/collect", async (req, res): Promise<void> => {
 
   const { customer_name: _customerName, ...ashtechBody } = parsed.data;
 
+  let response: Response;
   try {
-    const response = await fetch(`${ASHTECH_BASE}/v1/collect`, {
+    response = await fetch(`${ASHTECH_BASE}/v1/collect`, {
       method: "POST",
       headers: ashtechHeaders(),
       body: JSON.stringify(ashtechBody),
     });
-
-    const data = await response.json();
-
-    if (response.status === 202) {
-      res.status(202).json(data);
-      return;
-    }
-
-    if (response.status === 400) {
-      res.status(400).json(data);
-      return;
-    }
-
-    req.log.error({ status: response.status, data }, "Unexpected status from Ashtech Pay collect");
-    res.status(response.status).json(data);
   } catch (err) {
-    req.log.error({ err }, "Failed to initiate payment");
-    res.status(500).json({ error: "server_error", message: "Internal server error" });
+    req.log.error({ err }, "Network error reaching Ashtech Pay");
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Impossible de joindre le serveur de paiement. Veuillez réessayer.",
+    });
+    return;
   }
+
+  const data = await safeParseJson(response);
+
+  if (data === null) {
+    req.log.error(
+      { status: response.status },
+      "Ashtech Pay returned non-JSON response (possible Cloudflare block)"
+    );
+    res.status(502).json({
+      error: "gateway_error",
+      message:
+        "Le serveur de paiement est temporairement inaccessible. Veuillez réessayer dans quelques instants.",
+    });
+    return;
+  }
+
+  if (response.status === 202) {
+    res.status(202).json(data);
+    return;
+  }
+
+  if (response.status === 400) {
+    res.status(400).json(data);
+    return;
+  }
+
+  if (response.status === 401) {
+    req.log.error({ status: 401 }, "Ashtech Pay API key rejected");
+    res.status(502).json({
+      error: "auth_error",
+      message: "Clé API invalide ou révoquée. Contactez l'administrateur.",
+    });
+    return;
+  }
+
+  req.log.error({ status: response.status, data }, "Unexpected status from Ashtech Pay collect");
+  res.status(response.status >= 100 && response.status < 600 ? response.status : 502).json(data);
 });
 
 router.get("/transaction/:id", async (req, res): Promise<void> => {
@@ -112,18 +167,32 @@ router.get("/transaction/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  let response: Response;
   try {
-    const response = await fetch(
+    response = await fetch(
       `${ASHTECH_BASE}/v1/transaction/${encodeURIComponent(parsed.data.id)}`,
       { headers: ashtechHeaders() }
     );
-
-    const data = await response.json();
-    res.status(response.ok ? 200 : response.status).json(data);
   } catch (err) {
-    req.log.error({ err }, "Failed to get transaction");
-    res.status(500).json({ error: "server_error", message: "Internal server error" });
+    req.log.error({ err }, "Network error reaching Ashtech Pay");
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Impossible de joindre le serveur de paiement.",
+    });
+    return;
   }
+
+  const data = await safeParseJson(response);
+  if (data === null) {
+    req.log.error({ status: response.status }, "Ashtech Pay returned non-JSON for transaction");
+    res.status(502).json({
+      error: "gateway_error",
+      message: "Réponse invalide du serveur de paiement.",
+    });
+    return;
+  }
+
+  res.status(response.ok ? 200 : response.status).json(data);
 });
 
 router.post("/webhook", async (req, res): Promise<void> => {
