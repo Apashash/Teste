@@ -8,8 +8,6 @@
 import type { FeeEntry } from './feeEntry';
 
 /**
- * Platform fee rates returned by Ashtech Pay
+ * Platform fee rates per country returned by Ashtech Pay
  */
-export interface FeesResponse {
-  fees: FeeEntry[];
-}
+export type FeesResponse = FeeEntry[];

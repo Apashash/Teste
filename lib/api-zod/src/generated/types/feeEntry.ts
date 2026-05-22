@@ -7,12 +7,13 @@
  */
 
 export interface FeeEntry {
-  operator: string;
+  /** ISO country code (CM, SN, CI…) */
   country_code: string;
-  /** percentage or fixed */
-  fee_type: string;
-  /** Fee rate (e.g. 2.5 for 2.5%) or fixed amount */
-  fee_value: number;
-  min_fee?: number;
-  max_fee?: number;
+  country_name: string;
+  currency: string;
+  /** Total fee percentage applied on collect (e.g. 3.9 = 3.9%) */
+  total_fee_pct: number;
+  /** AshtechPay margin within the total fee */
+  ashtech_margin_pct: number;
+  operators: string[];
 }

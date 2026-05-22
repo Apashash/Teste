@@ -32358,16 +32358,15 @@ var GetCountriesResponse = objectType({
     "operators": arrayType(stringType())
   }))
 });
-var GetFeesResponse = objectType({
-  "fees": arrayType(objectType({
-    "operator": stringType(),
-    "country_code": stringType(),
-    "fee_type": stringType().describe("percentage or fixed"),
-    "fee_value": numberType().describe("Fee rate (e.g. 2.5 for 2.5%) or fixed amount"),
-    "min_fee": numberType().optional(),
-    "max_fee": numberType().optional()
-  }))
-}).describe("Platform fee rates returned by Ashtech Pay");
+var GetFeesResponseItem = objectType({
+  "country_code": stringType().describe("ISO country code (CM, SN, CI\u2026)"),
+  "country_name": stringType(),
+  "currency": stringType(),
+  "total_fee_pct": numberType().describe("Total fee percentage applied on collect (e.g. 3.9 = 3.9%)"),
+  "ashtech_margin_pct": numberType().describe("AshtechPay margin within the total fee"),
+  "operators": arrayType(stringType())
+});
+var GetFeesResponse = arrayType(GetFeesResponseItem);
 var InitiatePaymentBody = objectType({
   "amount": numberType().describe("Gross amount to collect"),
   "currency": stringType().describe("Country currency (XAF, XOF, GNF, CDF\u2026)"),

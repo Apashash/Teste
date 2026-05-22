@@ -35,16 +35,15 @@ export const GetCountriesResponse = zod.object({
  * Returns the platform fee rates in real time. Use credited_amount from /collect for the exact net amount per transaction.
  * @summary Get current fee rates
  */
-export const GetFeesResponse = zod.object({
-  "fees": zod.array(zod.object({
-  "operator": zod.string(),
-  "country_code": zod.string(),
-  "fee_type": zod.string().describe('percentage or fixed'),
-  "fee_value": zod.number().describe('Fee rate (e.g. 2.5 for 2.5%) or fixed amount'),
-  "min_fee": zod.number().optional(),
-  "max_fee": zod.number().optional()
-}))
-}).describe('Platform fee rates returned by Ashtech Pay')
+export const GetFeesResponseItem = zod.object({
+  "country_code": zod.string().describe('ISO country code (CM, SN, CI…)'),
+  "country_name": zod.string(),
+  "currency": zod.string(),
+  "total_fee_pct": zod.number().describe('Total fee percentage applied on collect (e.g. 3.9 = 3.9%)'),
+  "ashtech_margin_pct": zod.number().describe('AshtechPay margin within the total fee'),
+  "operators": zod.array(zod.string())
+})
+export const GetFeesResponse = zod.array(GetFeesResponseItem)
 
 
 /**

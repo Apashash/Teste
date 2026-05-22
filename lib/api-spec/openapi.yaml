@@ -246,37 +246,37 @@ components:
       required:
         - countries
     FeesResponse:
-      type: object
-      description: Platform fee rates returned by Ashtech Pay
-      properties:
-        fees:
-          type: array
-          items:
-            $ref: "#/components/schemas/FeeEntry"
-      required:
-        - fees
+      type: array
+      description: Platform fee rates per country returned by Ashtech Pay
+      items:
+        $ref: "#/components/schemas/FeeEntry"
     FeeEntry:
       type: object
       properties:
-        operator:
-          type: string
         country_code:
           type: string
-        fee_type:
+          description: "ISO country code (CM, SN, CI…)"
+        country_name:
           type: string
-          description: "percentage or fixed"
-        fee_value:
+        currency:
+          type: string
+        total_fee_pct:
           type: number
-          description: "Fee rate (e.g. 2.5 for 2.5%) or fixed amount"
-        min_fee:
+          description: "Total fee percentage applied on collect (e.g. 3.9 = 3.9%)"
+        ashtech_margin_pct:
           type: number
-        max_fee:
-          type: number
+          description: "AshtechPay margin within the total fee"
+        operators:
+          type: array
+          items:
+            type: string
       required:
-        - operator
         - country_code
-        - fee_type
-        - fee_value
+        - country_name
+        - currency
+        - total_fee_pct
+        - ashtech_margin_pct
+        - operators
     CollectRequest:
       type: object
       properties:

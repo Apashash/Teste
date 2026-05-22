@@ -57,48 +57,50 @@ export declare const GetCountriesResponse: zod.ZodObject<{
  * Returns the platform fee rates in real time. Use credited_amount from /collect for the exact net amount per transaction.
  * @summary Get current fee rates
  */
-export declare const GetFeesResponse: zod.ZodObject<{
-    fees: zod.ZodArray<zod.ZodObject<{
-        operator: zod.ZodString;
-        country_code: zod.ZodString;
-        fee_type: zod.ZodString;
-        fee_value: zod.ZodNumber;
-        min_fee: zod.ZodOptional<zod.ZodNumber>;
-        max_fee: zod.ZodOptional<zod.ZodNumber>;
-    }, "strip", zod.ZodTypeAny, {
-        operator: string;
-        country_code: string;
-        fee_type: string;
-        fee_value: number;
-        min_fee?: number | undefined;
-        max_fee?: number | undefined;
-    }, {
-        operator: string;
-        country_code: string;
-        fee_type: string;
-        fee_value: number;
-        min_fee?: number | undefined;
-        max_fee?: number | undefined;
-    }>, "many">;
+export declare const GetFeesResponseItem: zod.ZodObject<{
+    country_code: zod.ZodString;
+    country_name: zod.ZodString;
+    currency: zod.ZodString;
+    total_fee_pct: zod.ZodNumber;
+    ashtech_margin_pct: zod.ZodNumber;
+    operators: zod.ZodArray<zod.ZodString, "many">;
 }, "strip", zod.ZodTypeAny, {
-    fees: {
-        operator: string;
-        country_code: string;
-        fee_type: string;
-        fee_value: number;
-        min_fee?: number | undefined;
-        max_fee?: number | undefined;
-    }[];
+    currency: string;
+    operators: string[];
+    country_code: string;
+    country_name: string;
+    total_fee_pct: number;
+    ashtech_margin_pct: number;
 }, {
-    fees: {
-        operator: string;
-        country_code: string;
-        fee_type: string;
-        fee_value: number;
-        min_fee?: number | undefined;
-        max_fee?: number | undefined;
-    }[];
+    currency: string;
+    operators: string[];
+    country_code: string;
+    country_name: string;
+    total_fee_pct: number;
+    ashtech_margin_pct: number;
 }>;
+export declare const GetFeesResponse: zod.ZodArray<zod.ZodObject<{
+    country_code: zod.ZodString;
+    country_name: zod.ZodString;
+    currency: zod.ZodString;
+    total_fee_pct: zod.ZodNumber;
+    ashtech_margin_pct: zod.ZodNumber;
+    operators: zod.ZodArray<zod.ZodString, "many">;
+}, "strip", zod.ZodTypeAny, {
+    currency: string;
+    operators: string[];
+    country_code: string;
+    country_name: string;
+    total_fee_pct: number;
+    ashtech_margin_pct: number;
+}, {
+    currency: string;
+    operators: string[];
+    country_code: string;
+    country_name: string;
+    total_fee_pct: number;
+    ashtech_margin_pct: number;
+}>, "many">;
 /**
  * Initiates a payment and returns the transaction status.
 The platform fees are deducted automatically — credited_amount is the net amount credited.
@@ -123,20 +125,20 @@ export declare const InitiatePaymentBody: zod.ZodObject<{
     notify_url: zod.ZodOptional<zod.ZodString>;
 }, "strip", zod.ZodTypeAny, {
     currency: string;
-    operator: string;
     country_code: string;
     amount: number;
     phone: string;
+    operator: string;
     customer_name?: string | undefined;
     reference?: string | undefined;
     otp?: string | undefined;
     notify_url?: string | undefined;
 }, {
     currency: string;
-    operator: string;
     country_code: string;
     amount: number;
     phone: string;
+    operator: string;
     customer_name?: string | undefined;
     reference?: string | undefined;
     otp?: string | undefined;
