@@ -120,9 +120,9 @@ export default function PaymentPage() {
           }
         },
         onError: (err: unknown) => {
-          const apiErr = err as { response?: { status?: number; data?: { error?: string; message?: string; ussd_code?: string } } };
-          const errorData = apiErr?.response?.data;
-          const status = apiErr?.response?.status;
+          const apiErr = err as { status?: number; data?: { error?: string; message?: string; ussd_code?: string } | null };
+          const errorData = apiErr?.data;
+          const status = apiErr?.status;
 
           if (status === 400 && errorData?.error === "otp_required") {
             if (errorData.ussd_code) {
@@ -132,10 +132,11 @@ export default function PaymentPage() {
               setFlowState("otp-sms");
             }
           } else {
-            const msg =
-              errorData?.message ||
-              (err instanceof Error ? err.message : null) ||
-              "Une erreur est survenue lors de l'initiation du paiement.";
+            const rawMsg = errorData?.message || (err instanceof Error ? err.message : null);
+            const isHtml = typeof rawMsg === "string" && rawMsg.trimStart().includes("DOCTYPE");
+            const msg = isHtml || !rawMsg
+              ? "Le serveur de paiement est temporairement inaccessible. Veuillez réessayer."
+              : rawMsg;
             setErrorMessage(msg);
             setFlowState("failed");
           }
