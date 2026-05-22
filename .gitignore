@@ -1,7 +1,7 @@
 # See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
-# compiled output
-dist
+# compiled output — NE PAS ignorer les dist (nécessaires pour déploiement Plesk)
+# dist   <-- intentionnellement commenté pour inclure les builds dans git
 tmp
 out-tsc
 *.tsbuildinfo
