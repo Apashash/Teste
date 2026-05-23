@@ -17,7 +17,7 @@ import { Loader2, CheckCircle2, XCircle, ArrowRight, ShieldCheck } from "lucide-
 
 const paymentSchema = z.object({
   customer_name: z.string().min(2, "Nom complet requis"),
-  amount: z.coerce.number().min(100, "Le montant doit être d'au moins 100"),
+  amount: z.coerce.number().min(50, "Le montant doit être d'au moins 50"),
   country_code: z.string().min(2, "Pays requis"),
   operator: z.string().min(1, "Opérateur requis"),
   phone: z.string().min(8, "Numéro de téléphone invalide"),
